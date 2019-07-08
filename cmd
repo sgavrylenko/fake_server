@@ -1,0 +1,1 @@
+GOOS=linux GOARC=amd64 go build -o fake_server
