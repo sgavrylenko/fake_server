@@ -17,16 +17,16 @@ import (
 )
 
 var (
-	addr = flag.String("listen-address", ":8888",
-		"The address to listen on for HTTP requests.")
-	liveDuring = flag.Int("appTtl", 120,
-		"How long app will be alive")
-	started     = time.Now()
-	currenthost = func() string {
-		host, _ := os.Hostname()
-		return host
-	}()
+	app App
 )
+
+type App struct {
+	addr       string
+	liveDuring int
+	started    time.Time
+	worker     string
+	version    string
+}
 
 var (
 	httpRequestsCount = prometheus.NewCounterVec(
@@ -43,15 +43,17 @@ func formatRequest(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		fmt.Println(err)
 	}
-	hostnamestring := fmt.Sprintf("Worker hostname: %s\n", currenthost)
+	hostnamestring := fmt.Sprintf("Worker hostname: %s\n", app.worker)
+	versionstring := fmt.Sprintf("Version: %s", app.version)
 	requestDump = append(requestDump, hostnamestring...)
+	requestDump = append(requestDump, versionstring...)
 	log.Printf("remote_addr:%v, hostname: %v, method: %v, url:%v", r.RemoteAddr, r.Host, r.Method, r.URL)
 	w.Write(requestDump)
 }
 
 func healthz(w http.ResponseWriter, r *http.Request) {
-	duration := time.Now().Sub(started)
-	if duration.Seconds() > float64(*liveDuring) {
+	duration := time.Now().Sub(app.started)
+	if duration.Seconds() > float64(app.liveDuring) {
 		w.WriteHeader(500)
 		w.Write([]byte(fmt.Sprintf("error: %v", duration.Seconds())))
 	} else {
@@ -61,7 +63,7 @@ func healthz(w http.ResponseWriter, r *http.Request) {
 }
 
 func readiness(w http.ResponseWriter, r *http.Request) {
-	duration := time.Now().Sub(started)
+	duration := time.Now().Sub(app.started)
 	if duration.Seconds() < 5 {
 		w.WriteHeader(500)
 		w.Write([]byte(fmt.Sprintf("error: %v", duration.Seconds())))
@@ -87,6 +89,20 @@ func waitForShutdown(srv *http.Server) {
 	os.Exit(0)
 }
 
+func init() {
+	flag.StringVar(&app.addr, "listen-address", ":8888",
+		"The address to listen on for HTTP requests.")
+
+	flag.IntVar(&app.liveDuring, "appTtl", 120,
+		"How long app will be alive")
+	app.started = time.Now()
+
+	app.worker = func() string {
+		host, _ := os.Hostname()
+		return host
+	}()
+}
+
 func main() {
 	flag.Parse()
 
@@ -97,7 +113,7 @@ func main() {
 
 	srv := &http.Server{
 		Handler:      r,
-		Addr:         *addr,
+		Addr:         app.addr,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 	}
@@ -107,7 +123,7 @@ func main() {
 	r.HandleFunc("/readiness", readiness)
 	r.Handle("/metrics", promhttp.Handler())
 
-	log.Printf("Starting web server at %s\n", *addr)
+	log.Printf("Starting web server at %s\n", app.addr)
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil {
