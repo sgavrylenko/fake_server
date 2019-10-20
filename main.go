@@ -49,6 +49,17 @@ func healthz(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func readiness(w http.ResponseWriter, r *http.Request) {
+	duration := time.Now().Sub(started)
+	if duration.Seconds() > 5 {
+		w.WriteHeader(500)
+		w.Write([]byte(fmt.Sprintf("error: %v", duration.Seconds())))
+	} else {
+		w.WriteHeader(200)
+		w.Write([]byte("ok"))
+	}
+}
+
 func main() {
 	flag.Parse()
 
@@ -56,6 +67,7 @@ func main() {
 
 	http.HandleFunc("/", formatRequest)
 	http.HandleFunc("/healthz", healthz)
+	http.HandleFunc("/readiness", readiness)
 	http.Handle("/metrics", promhttp.Handler())
 
 	log.Printf("Starting web server at %s\n", *addr)
