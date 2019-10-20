@@ -8,10 +8,16 @@ import (
 	"log"
 	"net/http"
 	"net/http/httputil"
+	"time"
 )
 
-var addr = flag.String("listen-address", ":8888",
-	"The address to listen on for HTTP requests.")
+var (
+	addr = flag.String("listen-address", ":8888",
+		"The address to listen on for HTTP requests.")
+	liveDuring = flag.Int("appTtl", 120,
+		"How long app will be alive")
+	started = time.Now()
+)
 
 var (
 	httpRequestsCount = prometheus.NewCounterVec(
@@ -21,7 +27,6 @@ var (
 		}, []string{"location"})
 )
 
-
 func formatRequest(w http.ResponseWriter, r *http.Request) {
 	// Save a copy of this request for debugging.
 	httpRequestsCount.WithLabelValues("/").Inc()
@@ -29,16 +34,28 @@ func formatRequest(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		fmt.Println(err)
 	}
-	log.Printf("remote_addr:%v, hostname: %v, method: %v, url:%v",r.RemoteAddr, r.Host, r.Method, r.URL)
+	log.Printf("remote_addr:%v, hostname: %v, method: %v, url:%v", r.RemoteAddr, r.Host, r.Method, r.URL)
 	w.Write(requestDump)
 }
 
-func main()  {
+func healthz(w http.ResponseWriter, r *http.Request) {
+	duration := time.Now().Sub(started)
+	if duration.Seconds() > float64(*liveDuring) {
+		w.WriteHeader(500)
+		w.Write([]byte(fmt.Sprintf("error: %v", duration.Seconds())))
+	} else {
+		w.WriteHeader(200)
+		w.Write([]byte("ok"))
+	}
+}
+
+func main() {
 	flag.Parse()
 
 	prometheus.MustRegister(httpRequestsCount)
 
 	http.HandleFunc("/", formatRequest)
+	http.HandleFunc("/healthz", healthz)
 	http.Handle("/metrics", promhttp.Handler())
 
 	log.Printf("Starting web server at %s\n", *addr)
@@ -49,5 +66,3 @@ func main()  {
 		log.Printf("http.ListenAndServer: %v\n", err)
 	}
 }
-
-
