@@ -25,7 +25,6 @@ type App struct {
 	liveDuring int
 	started    time.Time
 	worker     string
-	version    string
 }
 
 var (
@@ -43,10 +42,18 @@ func formatRequest(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		fmt.Println(err)
 	}
-	hostnamestring := fmt.Sprintf("Worker hostname: %s\n", app.worker)
-	versionstring := fmt.Sprintf("Version: %s", app.version)
-	requestDump = append(requestDump, hostnamestring...)
-	requestDump = append(requestDump, versionstring...)
+	hostname := fmt.Sprintf("Worker hostname: %s\n", app.worker)
+	version := fmt.Sprintf("Version: %s\n", appVersion)
+	gitCommitString := fmt.Sprintf("git Commit: %s\n", gitCommit)
+	gitRepoString := fmt.Sprintf("git Repo: %s\n", gitRepo)
+	buildDate := fmt.Sprintf("Build date: %s\n", buildStamp)
+
+	requestDump = append(requestDump, hostname...)
+	requestDump = append(requestDump, version...)
+	requestDump = append(requestDump, gitCommitString...)
+	requestDump = append(requestDump, gitRepoString...)
+	requestDump = append(requestDump, buildDate...)
+
 	log.Printf("remote_addr:%v, hostname: %v, method: %v, url:%v", r.RemoteAddr, r.Host, r.Method, r.URL)
 	w.Write(requestDump)
 }
