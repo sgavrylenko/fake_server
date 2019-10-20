@@ -1,13 +1,18 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
+	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"log"
 	"net/http"
 	"net/http/httputil"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 )
 
@@ -16,7 +21,11 @@ var (
 		"The address to listen on for HTTP requests.")
 	liveDuring = flag.Int("appTtl", 120,
 		"How long app will be alive")
-	started = time.Now()
+	started     = time.Now()
+	currenthost = func() string {
+		host, _ := os.Hostname()
+		return host
+	}()
 )
 
 var (
@@ -34,6 +43,8 @@ func formatRequest(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		fmt.Println(err)
 	}
+	hostnamestring := fmt.Sprintf("Worker hostname: %s\n", currenthost)
+	requestDump = append(requestDump, hostnamestring...)
 	log.Printf("remote_addr:%v, hostname: %v, method: %v, url:%v", r.RemoteAddr, r.Host, r.Method, r.URL)
 	w.Write(requestDump)
 }
@@ -51,7 +62,7 @@ func healthz(w http.ResponseWriter, r *http.Request) {
 
 func readiness(w http.ResponseWriter, r *http.Request) {
 	duration := time.Now().Sub(started)
-	if duration.Seconds() > 5 {
+	if duration.Seconds() < 5 {
 		w.WriteHeader(500)
 		w.Write([]byte(fmt.Sprintf("error: %v", duration.Seconds())))
 	} else {
@@ -60,21 +71,49 @@ func readiness(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func waitForShutdown(srv *http.Server) {
+	interruptChan := make(chan os.Signal, 1)
+	signal.Notify(interruptChan, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+
+	// Block until we receive our signal.
+	<-interruptChan
+
+	// Create a deadline to wait for.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	defer cancel()
+	srv.Shutdown(ctx)
+
+	log.Println("Shutting down")
+	os.Exit(0)
+}
+
 func main() {
 	flag.Parse()
 
 	prometheus.MustRegister(httpRequestsCount)
 
-	http.HandleFunc("/", formatRequest)
-	http.HandleFunc("/healthz", healthz)
-	http.HandleFunc("/readiness", readiness)
-	http.Handle("/metrics", promhttp.Handler())
+	// Create Server and Route Handlers
+	r := mux.NewRouter()
+
+	srv := &http.Server{
+		Handler:      r,
+		Addr:         *addr,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+	}
+
+	r.HandleFunc("/", formatRequest)
+	r.HandleFunc("/healthz", healthz)
+	r.HandleFunc("/readiness", readiness)
+	r.Handle("/metrics", promhttp.Handler())
 
 	log.Printf("Starting web server at %s\n", *addr)
 
-	err := http.ListenAndServe(*addr, nil)
+	go func() {
+		if err := srv.ListenAndServe(); err != nil {
+			log.Printf("http.ListenAndServer: %v\n", err)
+		}
+	}()
 
-	if err != nil {
-		log.Printf("http.ListenAndServer: %v\n", err)
-	}
+	waitForShutdown(srv)
 }
