@@ -100,7 +100,7 @@ func init() {
 	flag.StringVar(&app.addr, "listen-address", ":8888",
 		"The address to listen on for HTTP requests.")
 
-	flag.IntVar(&app.liveDuring, "appTtl", 120,
+	flag.IntVar(&app.liveDuring, "ttl", 120,
 		"How long app will be alive")
 	app.started = time.Now()
 
